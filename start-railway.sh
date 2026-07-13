@@ -1,12 +1,8 @@
 #!/usr/bin/env bash
 # Railway entrypoint for Marzban panel.
-# 1. Bind host/port from Railway's $PORT.
-# 2. Run database migrations (falls back to create_all if alembic has no history).
-# 3. Create the sudo admin from env vars, if provided (idempotent).
-# 4. Start uvicorn.
 set -euo pipefail
 
-cd /code
+# حذف cd /code به دلیل تنظیم WORKDIR در داکرفایل
 
 export HOST="0.0.0.0"
 export PORT="${PORT:-8000}"
@@ -17,22 +13,27 @@ export SQLALCHEMY_DATABASE_URL="${SQLALCHEMY_DATABASE_URL:-sqlite:////code/db.sq
 echo "==> [railway] Marzban panel starting on ${HOST}:${PORT}"
 
 echo "==> [railway] Running database migrations (alembic upgrade head)..."
-alembic upgrade head || {
+if ! alembic upgrade head; then
     echo "!! [railway] alembic upgrade failed; falling back to create_all()..."
-    python - <<'PY'
+    python -c "
 import app.db.base as b
 try:
     b.Base.metadata.create_all(bind=b.engine)
-    print("create_all() succeeded")
+    print('create_all() succeeded')
 except Exception as e:
-    print("create_all() also failed:", e)
-PY
-}
+    print('create_all() also failed:', e)
+    exit(1)
+"
+fi
 
 if [ -n "${SUDO_USERNAME:-}" ] && [ -n "${SUDO_PASSWORD:-}" ]; then
     echo "==> [railway] Ensuring sudo admin '${SUDO_USERNAME}' exists..."
-    python create_admin.py --username "$SUDO_USERNAME" --password "$SUDO_PASSWORD" --sudo \
-        || echo "!! [railway] admin creation reported an issue (it may already exist) - continuing"
+    # اضافه شدن 2> /dev/null برای پاکسازی لاگ‌های خطای غیرضروری در صورت وجود داشتن ادمین
+    if python create_admin.py --username "$SUDO_USERNAME" --password "$SUDO_PASSWORD" --sudo 2>/dev/null; then
+        echo "==> [railway] Admin created successfully."
+    else
+        echo "==> [railway] Admin already exists or creation skipped."
+    fi
 else
     echo "==> [railway] SUDO_USERNAME / SUDO_PASSWORD not set."
     echo "    Create an admin later from the Railway console with:"
@@ -40,6 +41,7 @@ else
 fi
 
 echo "==> [railway] Launching uvicorn..."
+# استفاده از --workers 1 کاملاً هوشمندانه است چون SQLite در ریلوی با Concurrency بالا قفل می‌شود (Database Locked)
 exec uvicorn main:app \
     --host "$HOST" \
     --port "$PORT" \
