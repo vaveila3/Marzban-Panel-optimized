@@ -7,7 +7,6 @@ ARG PYTHON_VERSION=3.12
 
 # --------------------------------------------------------
 # Stage 1: Unified Builder (Frontend + Backend + Xray)
-# ادغام بک‌اند و فرانت‌اند برای جلوگیری از مصرف بیش از حد رم در ریلی‌وی
 # --------------------------------------------------------
 FROM python:${PYTHON_VERSION}-slim AS builder
 
@@ -19,7 +18,6 @@ ENV PYTHONUNBUFFERED=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential gcc python3-dev libpq-dev git curl unzip ca-certificates gnupg \
     && rm -rf /var/lib/apt/lists/* \
-    # اضافه کردن مخزن رسمی Node.js 20.x
     && mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
     && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" > /etc/apt/sources.list.d/nodesource.list \
@@ -32,7 +30,7 @@ ARG MARZBAN_REPO=https://github.com/Gozargah/Marzban.git
 ARG MARZBAN_REF=master
 RUN git clone --depth 1 --branch ${MARZBAN_REF} ${MARZBAN_REPO} .
 
-# نصب ایمن Xray-core (دانلود اسکریپت، بررسی آن، سپس اجرا)
+# نصب ایمن Xray-core
 RUN curl -sL https://github.com/Gozargah/Marzban-scripts/raw/master/install_latest_xray.sh -o /tmp/install_xray.sh \
     && bash /tmp/install_xray.sh \
     && rm -f /tmp/install_xray.sh
@@ -62,14 +60,18 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /code
 
-# نصب فقط-runtime ها (بدون gcc و بدون node)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libpq5 ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
-# کپی بهینه شده با --chown برای جلوگیری از ایجاد لایه‌های حجیم
+# کپی پکیج‌های پایتون
 COPY --from=builder $PYTHON_LIB_PATH $PYTHON_LIB_PATH
-COPY --from=builder --chown=appuser:appuser /usr/local/bin/xray /usr/local/bin/xray
+
+# بهبود [Critical]: کپی کردن پوشه bin برای استخراج دستورات uvicorn، alembic و xray
+# (ابزارهای node و npm در /usr/bin/ هستند، پس نگران کپی شدن آن‌ها نباشید)
+COPY --from=builder --chown=appuser:appuser /usr/local/bin /usr/local/bin
+
+# کپی فایل‌های Xray و سورس کد
 COPY --from=builder --chown=appuser:appuser /usr/local/share/xray /usr/local/share/xray
 COPY --from=builder --chown=appuser:appuser /build /code
 
